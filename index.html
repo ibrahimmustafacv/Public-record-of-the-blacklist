@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>قائمة الأماكن - اختبار الاتصال</title>
+    <style>
+        body { font-family: Arial, sans-serif; padding: 20px; background: #f5f5f5; }
+        .container { max-width: 600px; margin: auto; background: white; padding: 20px; border-radius: 10px; }
+        h1 { color: #333; }
+        .place { background: #e9ecef; padding: 10px; margin: 8px 0; border-radius: 8px; }
+        .place .name { font-weight: bold; color: #d63031; }
+        .place .address { color: #555; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>📋 قائمة المطاعم المسجلة</h1>
+        <div id="places-list">⏳ جاري تحميل البيانات...</div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script>
+        // ⚠️ ضع هنا الرابط والمفتاح الخاصين بك (من الخطوة السابعة)
+        const supabaseUrl = 'https://ffubpyvdbcshmbqtzepd.supabase.co';
+        const supabaseKey = 'sb_publishable_GeZQTMZJicRvWStnljKi9A_28c-ZKsV';
+
+        const supabase = supabase.createClient(supabaseUrl, supabaseKey);
+
+        async function loadPlaces() {
+            const listDiv = document.getElementById('places-list');
+            
+            try {
+                const { data, error } = await supabase
+                    .from('places')
+                    .select('*');
+
+                if (error) {
+                    listDiv.innerHTML = '❌ خطأ في التحميل: ' + error.message;
+                    return;
+                }
+
+                if (data.length === 0) {
+                    listDiv.innerHTML = '📭 لا توجد أماكن مسجلة حالياً.';
+                    return;
+                }
+
+                // عرض البيانات
+                listDiv.innerHTML = data.map(place => `
+                    <div class="place">
+                        <div class="name">🏠 ${place.name}</div>
+                        <div class="address">📍 ${place.address || 'لا يوجد عنوان'}</div>
+                        <div style="font-size:14px;color:#888;">التصنيف: ${place.category || 'غير محدد'} | عدد الشكاوى: ${place.complaints_count}</div>
+                    </div>
+                `).join('');
+
+            } catch (err) {
+                listDiv.innerHTML = '❌ حدث خطأ غير متوقع: ' + err.message;
+            }
+        }
+
+        loadPlaces();
+    </script>
+</body>
+</html>
