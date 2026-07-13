@@ -785,7 +785,7 @@
     }
 
     /* ============================================================
-       مودال الإبلاغ (الموجود)
+       مودال الإبلاغ (الموجود) — تم تحديث التصنيفات
        ============================================================ */
     .modal-overlay{
         display:none;
@@ -907,6 +907,7 @@
         color:var(--text-faint);
         margin-top:6px;
     }
+
     .file-drop{
         border:1.5px dashed var(--line);
         border-radius:10px;
@@ -934,6 +935,7 @@
         font-size:12px;
         color:var(--text-dim);
     }
+
     .btn-submit-report{
         width:100%;
         background:linear-gradient(135deg, var(--danger) 0%, var(--danger-deep) 100%);
@@ -1102,13 +1104,32 @@
                         <i class="fas fa-filter"></i>
                         <select id="categoryFilter" onchange="applyFilters()" aria-label="تصفية حسب التصنيف">
                             <option value="الكل">كل التصنيفات</option>
-                            <option value="مطعم">مطعم</option>
-                            <option value="كافيه">كافيه</option>
-                            <option value="فندق">فندق</option>
-                            <option value="صيدلية">صيدلية</option>
-                            <option value="مكان خروج">مكان خروج</option>
-                            <option value="متجر إلكتروني">متجر إلكتروني</option>
-                            <option value="صفحة فيسبوك">صفحة فيسبوك</option>
+                            <!-- التصنيفات الجديدة (بدون إيموجيز) -->
+                            <option value="التجارة الإلكترونية">التجارة الإلكترونية</option>
+                            <option value="الوظائف">الوظائف</option>
+                            <option value="الاستثمار والمال">الاستثمار والمال</option>
+                            <option value="السيارات">السيارات</option>
+                            <option value="العقارات">العقارات</option>
+                            <option value="التعليم">التعليم</option>
+                            <option value="السفر">السفر</option>
+                            <option value="التقنية">التقنية</option>
+                            <option value="الخدمات المالية">الخدمات المالية</option>
+                            <option value="الشحن">الشحن</option>
+                            <option value="الخدمات الطبية">الخدمات الطبية</option>
+                            <option value="الألعاب">الألعاب</option>
+                            <option value="الاتصالات">الاتصالات</option>
+                            <option value="مواقع إلكترونية">مواقع إلكترونية</option>
+                            <option value="حسابات التواصل الاجتماعي">حسابات التواصل الاجتماعي</option>
+                            <option value="أشخاص">أشخاص</option>
+                            <option value="شركات ومؤسسات">شركات ومؤسسات</option>
+                            <!-- التصنيفات المعدلة إلى جمع -->
+                            <option value="مطاعم">مطاعم</option>
+                            <option value="كافيهات">كافيهات</option>
+                            <option value="فنادق">فنادق</option>
+                            <option value="صيدليات">صيدليات</option>
+                            <option value="أماكن الخروج والفسح">أماكن الخروج والفسح</option>
+                            <!-- التصنيف الجديد -->
+                            <option value="الأثاث والديكور">الأثاث والديكور</option>
                         </select>
                         <i class="fas fa-chevron-down"></i>
                     </div>
@@ -1166,7 +1187,7 @@
         <img class="lightbox-content" id="lightboxImage" src="" alt="معاينة الصورة">
     </div>
 
-    <!-- ================= مودال الإبلاغ ================= -->
+    <!-- ================= مودال الإبلاغ (تم تحديث التصنيفات) ================= -->
     <div class="modal-overlay" id="reportModal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
         <div class="modal-box">
             <button class="close-modal" onclick="closeModal()" aria-label="إغلاق"><i class="fas fa-xmark"></i></button>
@@ -1182,25 +1203,45 @@
                     <label for="reportCategory"><i class="fas fa-tags"></i> نوع الكيان / المكان</label>
                     <select id="reportCategory" required>
                         <option value="">-- اختر التصنيف --</option>
-                        <optgroup label="📍 أماكن وخدمات فعلية">
-                            <option value="مطعم">مطعم</option>
-                            <option value="كافيه">كافيه</option>
-                            <option value="فندق">فندق</option>
-                            <option value="صيدلية">صيدلية</option>
-                            <option value="مستشفى / عيادة">مستشفى / عيادة</option>
-                            <option value="مدرسة / جامعة">مدرسة / جامعة</option>
-                            <option value="محل تجاري / سوبر ماركت">محل تجاري / سوبر ماركت</option>
-                            <option value="مكان خروج (ملهى / منتجع)">مكان خروج (ملهى / منتجع)</option>
-                            <option value="شركة / مؤسسة">شركة / مؤسسة</option>
-                            <option value="بنك / صرافة">بنك / صرافة</option>
-                            <option value="محطة وقود / خدمة سيارات">محطة وقود / خدمة سيارات</option>
+                        <optgroup label="أماكن وخدمات فعلية">
+                            <option value="مطاعم">مطاعم</option>
+                            <option value="كافيهات">كافيهات</option>
+                            <option value="فنادق">فنادق</option>
+                            <option value="صيدليات">صيدليات</option>
+                            <option value="مستشفيات وعيادات">مستشفيات وعيادات</option>
+                            <option value="مدارس وجامعات">مدارس وجامعات</option>
+                            <option value="محلات تجارية وسوبر ماركت">محلات تجارية وسوبر ماركت</option>
+                            <option value="أماكن الخروج والفسح">أماكن الخروج والفسح</option>
+                            <option value="شركات ومؤسسات">شركات ومؤسسات</option>
+                            <option value="بنوك وصرفات">بنوك وصرفات</option>
+                            <option value="محطات وقود وخدمة سيارات">محطات وقود وخدمة سيارات</option>
+                            <option value="السيارات (معارض/تأجير)">السيارات (معارض/تأجير)</option>
+                            <option value="العقارات">العقارات</option>
+                            <option value="الخدمات الطبية">الخدمات الطبية</option>
+                            <option value="الشحن">الشحن</option>
+                            <option value="الاتصالات">الاتصالات</option>
+                            <!-- التصنيف الجديد -->
+                            <option value="الأثاث والديكور">الأثاث والديكور</option>
                         </optgroup>
-                        <optgroup label="🌐 منصات وحسابات رقمية">
-                            <option value="صفحة فيسبوك">صفحة فيسبوك</option>
-                            <option value="صفحة إنستغرام">صفحة إنستغرام</option>
-                            <option value="حساب واتساب (رقم)">حساب واتساب (رقم)</option>
-                            <option value="متجر إلكتروني (أمازون/نون)">متجر إلكتروني (أمازون/نون)</option>
-                            <option value="موقع ويب / خدمة أونلاين">موقع ويب / خدمة أونلاين</option>
+                        <optgroup label="منصات وحسابات رقمية">
+                            <option value="صفحات إنستغرام">صفحات إنستغرام</option>
+                            <option value="حسابات واتساب (أرقام)">حسابات واتساب (أرقام)</option>
+                            <option value="متاجر إلكترونية (أمازون/نون)">متاجر إلكترونية (أمازون/نون)</option>
+                            <option value="مواقع ويب وخدمات أونلاين">مواقع ويب وخدمات أونلاين</option>
+                            <option value="التجارة الإلكترونية">التجارة الإلكترونية</option>
+                            <option value="التقنية">التقنية</option>
+                            <option value="مواقع إلكترونية">مواقع إلكترونية</option>
+                            <option value="حسابات التواصل الاجتماعي">حسابات التواصل الاجتماعي</option>
+                        </optgroup>
+                        <optgroup label="خدمات ومنصات متنوعة">
+                            <option value="الوظائف">الوظائف</option>
+                            <option value="الاستثمار والمال">الاستثمار والمال</option>
+                            <option value="السفر">السفر</option>
+                            <option value="التعليم">التعليم</option>
+                            <option value="الخدمات المالية">الخدمات المالية</option>
+                            <option value="الألعاب">الألعاب</option>
+                            <option value="أشخاص">أشخاص</option>
+                            <option value="شركات ومؤسسات">شركات ومؤسسات</option>
                         </optgroup>
                         <option value="أخرى">أخرى (اكتب التفاصيل في الوصف)</option>
                     </select>
