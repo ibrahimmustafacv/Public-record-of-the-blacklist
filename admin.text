@@ -1,0 +1,600 @@
+import requests
+import uuid
+import time
+import json
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import Application, CommandHandler, MessageHandler, filters, ConversationHandler, ContextTypes, CallbackQueryHandler
+
+# ============================================================
+# 🔑 بيانات الدخول
+# ============================================================
+BOT_TOKEN = '8825281450:AAHy3fKehgqb0iPVMz0bwiELDTT-7i4x3zQ'
+ADMIN_CHAT_ID = '848066586'
+
+SUPABASE_URL = 'https://ffubpyvdbcshmbqtzepd.supabase.co'
+SUPABASE_ANON_KEY = 'sb_publishable_GeZQTMZJicRvWStnljKi9A_28c-ZKsV'
+
+# ============================================================
+# 📋 قائمة التصنيفات (بدون إيموجيز، بصيغة الجمع)
+# ============================================================
+CATEGORIES = [
+    "مطاعم", "كافيهات", "فنادق", "صيدليات", "مستشفيات وعيادات",
+    "مدارس وجامعات", "محلات تجارية وسوبر ماركت", "أماكن الخروج والفسح",
+    "شركات ومؤسسات", "بنوك وصرفات", "محطات وقود وخدمة سيارات",
+    "السيارات (معارض/تأجير)", "العقارات", "الخدمات الطبية", "الشحن",
+    "الاتصالات", "الأثاث والديكور", "التجارة الإلكترونية", "التقنية",
+    "مواقع إلكترونية", "حسابات التواصل الاجتماعي", "الوظائف",
+    "الاستثمار والمال", "السفر", "التعليم", "الخدمات المالية",
+    "الألعاب", "أشخاص"
+]
+
+# ============================================================
+# 📋 مراحل المحادثة (إضافة مكان جديد) - تم إزالة LOCATION و LOCATION_LINK
+# ============================================================
+(
+    CATEGORY, NAME, ADDRESS, DESCRIPTION, PHOTO,
+    EXTRA_OPTION, FACEBOOK, INSTAGRAM, WHATSAPP,
+    COMPLAINT_OPTION, COMPLAINT_NAME, COMPLAINT_DESC, COMPLAINT_PHOTO,
+    COMPLAINT_LOOP, FINAL_CONFIRM
+) = range(15)
+
+# ============================================================
+# 📋 مراحل المحادثة (إضافة مشكلة لكيان موجود)
+# ============================================================
+SELECT_PLACE, ISSUE_NAME, ISSUE_DESC, ISSUE_PHOTO = range(15, 19)
+
+# تخزين البيانات المؤقتة
+user_data = {}
+
+# ============================================================
+# 📤 دالة رفع الصورة إلى Supabase Storage
+# ============================================================
+def upload_image_to_supabase(file_content, file_extension='jpg'):
+    file_name = f"place_{int(time.time())}_{uuid.uuid4().hex[:8]}.{file_extension}"
+    url = f"{SUPABASE_URL}/storage/v1/object/place_images/{file_name}"
+    headers = {
+        "apikey": SUPABASE_ANON_KEY,
+        "Authorization": f"Bearer {SUPABASE_ANON_KEY}",
+        "Content-Type": "image/jpeg"
+    }
+    try:
+        response = requests.post(url, data=file_content, headers=headers)
+        if response.status_code in [200, 201]:
+            public_url = f"{SUPABASE_URL}/storage/v1/object/public/place_images/{file_name}"
+            return True, public_url
+        else:
+            return False, f"فشل الرفع: {response.text}"
+    except Exception as e:
+        return False, f"خطأ في الاتصال: {str(e)}"
+
+# ============================================================
+# 📤 دالة جلب الأماكن من قاعدة البيانات
+# ============================================================
+def get_places():
+    url = f"{SUPABASE_URL}/rest/v1/places?select=id,name,category&is_blacklisted=eq.true&order=id.desc"
+    headers = {
+        "apikey": SUPABASE_ANON_KEY,
+        "Authorization": f"Bearer {SUPABASE_ANON_KEY}"
+    }
+    try:
+        response = requests.get(url, headers=headers)
+        if response.status_code == 200:
+            return response.json()
+        else:
+            return []
+    except Exception as e:
+        print(f"خطأ في جلب الأماكن: {e}")
+        return []
+
+# ============================================================
+# 📤 دالة إضافة مشكلة إلى مكان موجود
+# ============================================================
+def add_issue_to_place(place_id, issue_data):
+    url = f"{SUPABASE_URL}/rest/v1/places?id=eq.{place_id}&select=complaints_details"
+    headers = {
+        "apikey": SUPABASE_ANON_KEY,
+        "Authorization": f"Bearer {SUPABASE_ANON_KEY}"
+    }
+    try:
+        response = requests.get(url, headers=headers)
+        if response.status_code != 200:
+            return False, "فشل جلب بيانات المكان"
+        
+        data = response.json()
+        if not data:
+            return False, "المكان غير موجود"
+        
+        current_details = data[0].get('complaints_details', [])
+        if isinstance(current_details, str):
+            try:
+                current_details = json.loads(current_details)
+            except:
+                current_details = []
+        
+        current_details.append(issue_data)
+        
+        update_url = f"{SUPABASE_URL}/rest/v1/places?id=eq.{place_id}"
+        update_headers = {
+            "apikey": SUPABASE_ANON_KEY,
+            "Authorization": f"Bearer {SUPABASE_ANON_KEY}",
+            "Content-Type": "application/json",
+            "Prefer": "return=minimal"
+        }
+        payload = {
+            "complaints_details": json.dumps(current_details, ensure_ascii=False)
+        }
+        update_response = requests.patch(update_url, json=payload, headers=update_headers)
+        
+        if update_response.status_code in [200, 204]:
+            return True, "تم إضافة المشكلة بنجاح"
+        else:
+            return False, f"فشل التحديث: {update_response.text}"
+            
+    except Exception as e:
+        return False, f"خطأ: {str(e)}"
+
+# ============================================================
+# 📤 دالة حفظ مكان جديد (تم إزالة location_link)
+# ============================================================
+def save_to_supabase(data):
+    url = f"{SUPABASE_URL}/rest/v1/places"
+    headers = {
+        "apikey": SUPABASE_ANON_KEY,
+        "Authorization": f"Bearer {SUPABASE_ANON_KEY}",
+        "Content-Type": "application/json",
+        "Prefer": "return=representation"
+    }
+    
+    notes_text = f"📝 الوصف: {data['description']}"
+    
+    complaints_json = json.dumps(data.get('complaints', []), ensure_ascii=False)
+    
+    payload = {
+        "name": data['name'],
+        "address": data['address'],
+        "category": data['category'],
+        "complaints_count": 10,
+        "is_blacklisted": True,
+        "notes": notes_text,
+        "image_url": data.get('image_url'),
+        "facebook": data.get('facebook'),
+        "instagram": data.get('instagram'),
+        "whatsapp": data.get('whatsapp'),
+        "complaints_details": complaints_json
+    }
+    
+    try:
+        response = requests.post(url, json=payload, headers=headers)
+        if response.status_code in [200, 201]:
+            return True, "تم الحفظ بنجاح"
+        else:
+            error_msg = response.json().get('message', response.text)
+            return False, f"خطأ في الخادم: {error_msg}"
+    except Exception as e:
+        return False, f"خطأ في الاتصال: {str(e)}"
+
+# ============================================================
+# 🤖 دوال البوت الأساسية (بدء، إلغاء)
+# ============================================================
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_CHAT_ID:
+        await update.message.reply_text("⛔ هذا البوت خاص بالإدارة فقط.")
+        return
+    await update.message.reply_text(
+        "👋 مرحباً! الأوامر المتاحة:\n"
+        "/add - إضافة مكان جديد\n"
+        "/addissue - إضافة مشكلة لكيان موجود\n"
+        "/cancel - إلغاء العملية الحالية"
+    )
+
+async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_CHAT_ID:
+        await update.message.reply_text("⛔ غير مصرح.")
+        return ConversationHandler.END
+    user_data.pop(update.effective_user.id, None)
+    await update.message.reply_text("❌ تم إلغاء العملية.")
+    return ConversationHandler.END
+
+# ============================================================
+# 🆕 إضافة مكان جديد (مع أزرار تصنيف)
+# ============================================================
+async def add_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_CHAT_ID:
+        await update.message.reply_text("⛔ غير مصرح.")
+        return ConversationHandler.END
+    
+    user_data[update.effective_user.id] = {'complaints': []}
+    
+    # بناء أزرار التصنيفات (صفوف كل 3 أزرار)
+    keyboard = []
+    row = []
+    for i, cat in enumerate(CATEGORIES):
+        row.append(InlineKeyboardButton(cat, callback_data=f"cat_{cat}"))
+        if len(row) == 3:
+            keyboard.append(row)
+            row = []
+    if row:
+        keyboard.append(row)
+    
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await update.message.reply_text(
+        "🏷️ *اختر نوع المكان من القائمة أدناه:*",
+        reply_markup=reply_markup,
+        parse_mode='Markdown'
+    )
+    return CATEGORY
+
+async def category_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    
+    category = query.data.split('_', 1)[1]
+    user_data[query.from_user.id]['category'] = category
+    
+    await query.edit_message_text(
+        f"✅ تم اختيار: *{category}*\n\n"
+        "🏠 *الخطوة 2/5: ما هو اسم المكان أو الصفحة؟*",
+        parse_mode='Markdown'
+    )
+    return NAME
+
+async def get_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_data[update.effective_user.id]['name'] = update.message.text
+    await update.message.reply_text("📍 *الخطوة 3/5: ما هو العنوان الفعلي أو رابط الصفحة؟*", parse_mode='Markdown')
+    return ADDRESS
+
+async def get_address(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_data[update.effective_user.id]['address'] = update.message.text
+    await update.message.reply_text("📝 *الخطوة 4/5: اكتب وصفاً مختصراً للشكوى (السبب الأساسي).*", parse_mode='Markdown')
+    return DESCRIPTION
+
+async def get_description(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_data[update.effective_user.id]['description'] = update.message.text
+    await update.message.reply_text("🖼️ *الخطوة 5/5: أرسل صورة للمكان (لقطة شاشة أو صورة حقيقية).*\nاكتب 'لا' للتخطي.", parse_mode='Markdown')
+    return PHOTO
+
+async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.message.photo:
+        photo = update.message.photo[-1]
+        file = await context.bot.get_file(photo.file_id)
+        file_bytes = await file.download_as_bytearray()
+        success, result = upload_image_to_supabase(file_bytes, 'jpg')
+        if success:
+            user_data[update.effective_user.id]['image_url'] = result
+            await update.message.reply_text("✅ تم رفع الصورة بنجاح!")
+        else:
+            await update.message.reply_text(f"⚠️ فشل رفع الصورة: {result}\nسنكمل بدون صورة.")
+            user_data[update.effective_user.id]['image_url'] = None
+    else:
+        user_data[update.effective_user.id]['image_url'] = None
+        await update.message.reply_text("⏩ تم تخطي الصورة.")
+    
+    await update.message.reply_text(
+        "📌 *هل توجد تفاصيل إضافية عن المكان؟*\n"
+        "(روابط تواصل، مشاكل مسجلة)\n"
+        "أرسل 'نعم' للمتابعة أو 'لا' للتخطي.",
+        parse_mode='Markdown'
+    )
+    return EXTRA_OPTION
+
+# ============================================================
+# 📝 التفاصيل الإضافية (فيسبوك، إنستغرام، واتساب فقط)
+# ============================================================
+async def extra_option(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.message.text.lower() == 'نعم':
+        await update.message.reply_text("🔗 *أدخل رابط صفحة فيسبوك (إن وجد):*\nأو اكتب 'لا' للتخطي.", parse_mode='Markdown')
+        return FACEBOOK
+    else:
+        await show_final_summary(update, context)
+        return FINAL_CONFIRM
+
+async def get_facebook(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text
+    user_data[update.effective_user.id]['facebook'] = None if text.lower() == 'لا' else text
+    await update.message.reply_text("📸 *أدخل رابط حساب إنستغرام (إن وجد):*\nأو اكتب 'لا' للتخطي.", parse_mode='Markdown')
+    return INSTAGRAM
+
+async def get_instagram(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text
+    user_data[update.effective_user.id]['instagram'] = None if text.lower() == 'لا' else text
+    await update.message.reply_text("💬 *أدخل رقم واتساب أو رابط (إن وجد):*\nأو اكتب 'لا' للتخطي.", parse_mode='Markdown')
+    return WHATSAPP
+
+async def get_whatsapp(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text
+    user_data[update.effective_user.id]['whatsapp'] = None if text.lower() == 'لا' else text
+    await update.message.reply_text(
+        "📋 *هل توجد مشاكل مسجلة عن هذا المكان؟*\n"
+        "(شكاوى من عملاء سابقين)\n"
+        "أرسل 'نعم' للإضافة أو 'لا' للتخطي.",
+        parse_mode='Markdown'
+    )
+    return COMPLAINT_OPTION
+
+# ============================================================
+# 📝 إضافة مشاكل متعددة
+# ============================================================
+async def complaint_option(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.message.text.lower() == 'نعم':
+        await update.message.reply_text("👤 *أدخل اسم العميل/المشتكي:*", parse_mode='Markdown')
+        return COMPLAINT_NAME
+    else:
+        await show_final_summary(update, context)
+        return FINAL_CONFIRM
+
+async def get_complaint_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_data[update.effective_user.id]['temp_complaint'] = {
+        'name': update.message.text,
+        'description': '',
+        'images': []
+    }
+    await update.message.reply_text("📝 *أدخل وصف المشكلة بالتفصيل:*", parse_mode='Markdown')
+    return COMPLAINT_DESC
+
+async def get_complaint_desc(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_data[update.effective_user.id]['temp_complaint']['description'] = update.message.text
+    await update.message.reply_text(
+        "🖼️ *أرسل الصور المرفقة لهذه المشكلة (إن وجدت)*\n"
+        "يمكنك إرسال عدة صور واحدة تلو الأخرى.\n"
+        "عند الانتهاء، اكتب 'تم'.",
+        parse_mode='Markdown'
+    )
+    return COMPLAINT_PHOTO
+
+async def handle_complaint_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.message.photo:
+        photo = update.message.photo[-1]
+        file = await context.bot.get_file(photo.file_id)
+        file_bytes = await file.download_as_bytearray()
+        success, result = upload_image_to_supabase(file_bytes, 'jpg')
+        if success:
+            if 'temp_complaint' not in user_data[update.effective_user.id]:
+                user_data[update.effective_user.id]['temp_complaint'] = {'images': []}
+            user_data[update.effective_user.id]['temp_complaint']['images'].append(result)
+            await update.message.reply_text("✅ تم رفع الصورة! أرسل المزيد أو اكتب 'تم' للانتهاء.")
+        else:
+            await update.message.reply_text(f"⚠️ فشل رفع الصورة: {result}")
+        return COMPLAINT_PHOTO
+    elif update.message.text.lower() == 'تم':
+        complaint = user_data[update.effective_user.id].get('temp_complaint', {})
+        if complaint.get('name') and complaint.get('description'):
+            user_data[update.effective_user.id]['complaints'].append(complaint)
+            user_data[update.effective_user.id].pop('temp_complaint', None)
+            await update.message.reply_text(
+                "✅ *تم حفظ المشكلة!*\n\n"
+                "هل تريد إضافة مشكلة أخرى؟\n"
+                "أرسل 'نعم' للإضافة أو 'لا' للانتهاء.",
+                parse_mode='Markdown'
+            )
+            return COMPLAINT_LOOP
+        else:
+            await update.message.reply_text("⚠️ حدث خطأ، حاول مرة أخرى.")
+            return COMPLAINT_NAME
+    else:
+        await update.message.reply_text("⚠️ أرسل صورة أو اكتب 'تم' للانتهاء.")
+        return COMPLAINT_PHOTO
+
+async def complaint_loop(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.message.text.lower() == 'نعم':
+        await update.message.reply_text("👤 *أدخل اسم العميل للمشكلة التالية:*", parse_mode='Markdown')
+        return COMPLAINT_NAME
+    else:
+        await show_final_summary(update, context)
+        return FINAL_CONFIRM
+
+async def show_final_summary(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    data = user_data[update.effective_user.id]
+    complaints = data.get('complaints', [])
+    
+    summary = "📋 *ملخص البيانات النهائي:*\n\n"
+    summary += f"🏷️ **النوع:** {data['category']}\n"
+    summary += f"🏠 **الاسم:** {data['name']}\n"
+    summary += f"📍 **العنوان:** {data['address']}\n"
+    summary += f"📝 **الوصف الأساسي:** {data['description']}\n"
+    summary += f"🖼️ **الصورة:** {'✅ مرفوعة' if data.get('image_url') else '❌ لا توجد'}\n\n"
+    
+    summary += "🔗 **تفاصيل إضافية:**\n"
+    summary += f"• فيسبوك: {data.get('facebook', 'غير موجود')}\n"
+    summary += f"• إنستغرام: {data.get('instagram', 'غير موجود')}\n"
+    summary += f"• واتساب: {data.get('whatsapp', 'غير موجود')}\n\n"
+    
+    if complaints:
+        summary += f"📌 **المشاكل المسجلة ({len(complaints)}):**\n"
+        for i, c in enumerate(complaints, 1):
+            summary += f"\n{i}. **{c['name']}**\n"
+            summary += f"   📝 {c['description']}\n"
+            if c.get('images'):
+                summary += f"   🖼️ {len(c['images'])} صورة مرفقة\n"
+    else:
+        summary += "📌 لا توجد مشاكل مسجلة."
+    
+    summary += "\n\n✅ *هل تريد حفظ هذه البيانات في القائمة السوداء؟*\nأرسل 'نعم' للتأكيد أو 'لا' للإلغاء."
+    
+    await update.message.reply_text(summary, parse_mode='Markdown')
+
+async def final_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.message.text.lower() == 'نعم':
+        data = user_data[update.effective_user.id]
+        success, message = save_to_supabase(data)
+        if success:
+            await update.message.reply_text("✅ *تم إضافة المكان بنجاح إلى القائمة السوداء!*\n🎉 افتح الموقع الآن وستجده قد ظهر.", parse_mode='Markdown')
+        else:
+            await update.message.reply_text(f"❌ *فشل الحفظ:*\n{message}", parse_mode='Markdown')
+    else:
+        await update.message.reply_text("❌ تم إلغاء العملية.")
+    
+    user_data.pop(update.effective_user.id, None)
+    return ConversationHandler.END
+
+# ============================================================
+# 🆕 إضافة مشكلة لكيان موجود
+# ============================================================
+async def add_issue_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != ADMIN_CHAT_ID:
+        await update.message.reply_text("⛔ غير مصرح.")
+        return ConversationHandler.END
+    
+    places = get_places()
+    if not places:
+        await update.message.reply_text("❌ لا توجد أماكن في القائمة السوداء حالياً.")
+        return ConversationHandler.END
+    
+    context.user_data['places_list'] = places
+    
+    keyboard = []
+    for p in places[:20]:
+        display_name = f"{p['name']} ({p.get('category', 'غير مصنف')})"
+        keyboard.append([InlineKeyboardButton(display_name, callback_data=f"place_{p['id']}")])
+    
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await update.message.reply_text(
+        "🏢 *اختر المكان الذي تريد إضافة مشكلة له:*\n"
+        "(اختر من القائمة أدناه)",
+        reply_markup=reply_markup,
+        parse_mode='Markdown'
+    )
+    return SELECT_PLACE
+
+async def select_place_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    
+    place_id = int(query.data.split('_')[1])
+    places = context.user_data.get('places_list', [])
+    
+    selected_place = None
+    for p in places:
+        if p['id'] == place_id:
+            selected_place = p
+            break
+    
+    if not selected_place:
+        await query.edit_message_text("❌ المكان غير موجود.")
+        return ConversationHandler.END
+    
+    user_data[query.from_user.id] = {
+        'place_id': place_id,
+        'place_name': selected_place['name'],
+        'issue': {}
+    }
+    
+    await query.edit_message_text(
+        f"✅ تم اختيار: *{selected_place['name']}*\n\n"
+        f"👤 *أدخل اسم العميل (المشتكي):*",
+        parse_mode='Markdown'
+    )
+    return ISSUE_NAME
+
+async def get_issue_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_data[update.effective_user.id]['issue']['name'] = update.message.text
+    await update.message.reply_text("📝 *أدخل وصف المشكلة بالتفصيل:*", parse_mode='Markdown')
+    return ISSUE_DESC
+
+async def get_issue_desc(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_data[update.effective_user.id]['issue']['description'] = update.message.text
+    user_data[update.effective_user.id]['issue']['images'] = []
+    await update.message.reply_text(
+        "🖼️ *أرسل الصور المرفقة لهذه المشكلة (إن وجدت)*\n"
+        "يمكنك إرسال عدة صور واحدة تلو الأخرى.\n"
+        "عند الانتهاء، اكتب 'تم'.",
+        parse_mode='Markdown'
+    )
+    return ISSUE_PHOTO
+
+async def handle_issue_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.message.photo:
+        photo = update.message.photo[-1]
+        file = await context.bot.get_file(photo.file_id)
+        file_bytes = await file.download_as_bytearray()
+        success, result = upload_image_to_supabase(file_bytes, 'jpg')
+        if success:
+            user_data[update.effective_user.id]['issue']['images'].append(result)
+            await update.message.reply_text("✅ تم رفع الصورة! أرسل المزيد أو اكتب 'تم' للانتهاء.")
+        else:
+            await update.message.reply_text(f"⚠️ فشل رفع الصورة: {result}")
+        return ISSUE_PHOTO
+    elif update.message.text.lower() == 'تم':
+        issue = user_data[update.effective_user.id]['issue']
+        place_id = user_data[update.effective_user.id]['place_id']
+        place_name = user_data[update.effective_user.id]['place_name']
+        
+        if not issue.get('name') or not issue.get('description'):
+            await update.message.reply_text("⚠️ اسم العميل ووصف المشكلة مطلوبان!")
+            return ISSUE_NAME
+        
+        success, message = add_issue_to_place(place_id, issue)
+        
+        if success:
+            await update.message.reply_text(
+                f"✅ *تم إضافة المشكلة بنجاح إلى '{place_name}'!*\n\n"
+                f"👤 **العميل:** {issue['name']}\n"
+                f"📝 **الوصف:** {issue['description']}\n"
+                f"🖼️ **الصور:** {len(issue.get('images', []))} صورة مرفقة\n\n"
+                f"🔗 افتح الموقع الآن وستجد المشكلة الجديدة قد ظهرت.",
+                parse_mode='Markdown'
+            )
+        else:
+            await update.message.reply_text(f"❌ *فشل الحفظ:*\n{message}", parse_mode='Markdown')
+        
+        user_data.pop(update.effective_user.id, None)
+        context.user_data.pop('places_list', None)
+        return ConversationHandler.END
+    else:
+        await update.message.reply_text("⚠️ أرسل صورة أو اكتب 'تم' للانتهاء.")
+        return ISSUE_PHOTO
+
+# ============================================================
+# 🚀 تشغيل البوت
+# ============================================================
+def main():
+    application = Application.builder().token(BOT_TOKEN).build()
+    
+    # ===== ConversationHandler لإضافة مكان جديد =====
+    add_place_handler = ConversationHandler(
+        entry_points=[CommandHandler('add', add_start)],
+        states={
+            CATEGORY: [CallbackQueryHandler(category_callback)],
+            NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_name)],
+            ADDRESS: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_address)],
+            DESCRIPTION: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_description)],
+            PHOTO: [MessageHandler(filters.PHOTO, handle_photo), MessageHandler(filters.TEXT & ~filters.COMMAND, handle_photo)],
+            EXTRA_OPTION: [MessageHandler(filters.TEXT & ~filters.COMMAND, extra_option)],
+            FACEBOOK: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_facebook)],
+            INSTAGRAM: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_instagram)],
+            WHATSAPP: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_whatsapp)],
+            COMPLAINT_OPTION: [MessageHandler(filters.TEXT & ~filters.COMMAND, complaint_option)],
+            COMPLAINT_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_complaint_name)],
+            COMPLAINT_DESC: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_complaint_desc)],
+            COMPLAINT_PHOTO: [MessageHandler(filters.PHOTO, handle_complaint_photo), MessageHandler(filters.TEXT & ~filters.COMMAND, handle_complaint_photo)],
+            COMPLAINT_LOOP: [MessageHandler(filters.TEXT & ~filters.COMMAND, complaint_loop)],
+            FINAL_CONFIRM: [MessageHandler(filters.TEXT & ~filters.COMMAND, final_confirm)],
+        },
+        fallbacks=[CommandHandler('cancel', cancel)],
+    )
+    
+    # ===== ConversationHandler لإضافة مشكلة لكيان موجود =====
+    add_issue_handler = ConversationHandler(
+        entry_points=[CommandHandler('addissue', add_issue_start)],
+        states={
+            SELECT_PLACE: [CallbackQueryHandler(select_place_callback)],
+            ISSUE_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_issue_name)],
+            ISSUE_DESC: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_issue_desc)],
+            ISSUE_PHOTO: [MessageHandler(filters.PHOTO, handle_issue_photo), MessageHandler(filters.TEXT & ~filters.COMMAND, handle_issue_photo)],
+        },
+        fallbacks=[CommandHandler('cancel', cancel)],
+    )
+    
+    application.add_handler(add_place_handler)
+    application.add_handler(add_issue_handler)
+    application.add_handler(CommandHandler('start', start))
+    application.add_handler(CommandHandler('cancel', cancel))
+    
+    print("🚀 بوت الإدارة يعمل... (مع أزرار تصنيف وتحديثات)")
+    print("📌 الأوامر المتاحة:")
+    print("   /add       - إضافة مكان جديد (اختيار تصنيف من أزرار)")
+    print("   /addissue  - إضافة مشكلة لكيان موجود")
+    print("   /cancel    - إلغاء العملية الحالية")
+    application.run_polling()
+
+if __name__ == '__main__':
+    main()
